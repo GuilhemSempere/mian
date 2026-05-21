@@ -62,12 +62,23 @@ RUN echo "/usr/local/lib/R/lib" > /etc/ld.so.conf.d/r.conf \
     && ldconfig
 
 # Install Python packages (rpy2 requires R to be present)
+# PIP_DEFAULT_TIMEOUT guards against dropped connections on large downloads (tensorflow is ~450 MB).
+ENV PIP_DEFAULT_TIMEOUT=300
+
 COPY requirements.txt /
 RUN python -m pip install --upgrade pip \
-    && pip install "setuptools<60" "wheel<0.38" "Cython<3" cffi \
-    && grep -v '^scikit-bio' /requirements.txt | grep -v '^biom-format' > /tmp/requirements-no-skbio.txt \
-    && pip install -r /tmp/requirements-no-skbio.txt \
-    && pip install --no-build-isolation biom-format \
+    && pip install "setuptools<60" "wheel<0.38" "Cython<3" cffi
+
+# tensorflow is ~450 MB — keep it in its own layer so a timeout only retries this step.
+RUN grep '^tensorflow' /requirements.txt | xargs pip install
+
+# Remaining packages (excluding the two that need --no-build-isolation).
+RUN grep -v '^scikit-bio' /requirements.txt | grep -v '^biom-format' | grep -v '^tensorflow' \
+    > /tmp/requirements-no-skbio.txt \
+    && pip install -r /tmp/requirements-no-skbio.txt
+
+# biom-format and scikit-bio require --no-build-isolation due to their C extensions.
+RUN pip install --no-build-isolation biom-format \
     && pip install --no-build-isolation scikit-bio==0.5.7
 
 # Copy application source
